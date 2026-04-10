@@ -27,8 +27,10 @@ from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
 
+from cc_python.compact import auto_compact_if_needed
 from cc_python.config import (
     apply_settings_env,
+    get_context_window,
     get_effective_api_key,
     get_effective_base_url,
 )
@@ -454,6 +456,14 @@ async def query_with_tools(
     tools_schema = [tool_to_api_schema(t) for t in tools]
 
     current_messages = list(messages)
+
+    # 上下文压缩：在发送 API 前检查 token 数
+    context_window = get_context_window()
+    current_messages = await auto_compact_if_needed(
+        current_messages, system_prompt,
+        client, client_format, model,
+        context_window=context_window,
+    )
     final_text = ""
 
     # 对应 TS query.ts:654 while (attemptWithFallback) 循环

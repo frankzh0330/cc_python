@@ -129,3 +129,16 @@ def get_effective_model(default: str = "claude-sonnet-4-20250514") -> str:
         or get_settings_env().get("ANTHROPIC_MODEL")
         or default
     )
+
+
+def get_context_window() -> int:
+    """获取上下文窗口大小（tokens）。
+
+    用于上下文压缩的阈值计算。
+    默认 200000（Claude Sonnet）。
+    """
+    return int(
+        os.environ.get("CLAUDE_CONTEXT_WINDOW", "")
+        or get_settings_env().get("CLAUDE_CONTEXT_WINDOW", "")
+        or "200000"
+    )

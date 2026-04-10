@@ -35,6 +35,7 @@ src/cc_python/
 | [plan.md](plan.md) | 9 阶段开发计划 + TS 源码映射 |
 | [docs/hooks.md](docs/hooks.md) | Hooks 系统详解 |
 | [docs/claudemd.md](docs/claudemd.md) | CLAUDE.md 加载系统详解 |
+| [docs/compact.md](docs/compact.md) | 上下文压缩系统详解 |
 | [docs/system_prompt_sections.md](docs/system_prompt_sections.md) | System Prompt 13 个 section 详解 |
 
 ## 开发状态
@@ -46,7 +47,7 @@ src/cc_python/
 | 3. 权限系统 | ✅ |
 | 4. Hooks 系统 | ✅ |
 | 5. CLAUDE.md 读取注入 | ✅ |
-| 6. 上下文压缩 | 待实现 |
+| 6. 上下文压缩 | ✅ |
 | 7. Message + Attachments 增强 | 待实现 |
 | 8. 高级工具（Agent/Task/Plan） | 待实现 |
 | 9. MCP + Skills + Commands | 待实现 |
