@@ -16,9 +16,11 @@ from rich.table import Table
 from rich.text import Text
 
 from cc_python.api import create_client, query_with_tools
+from cc_python.commands import CommandResult, dispatch_command, parse_slash_command
 from cc_python.config import get_effective_model
 from cc_python.context import build_system_prompt
 from cc_python.hooks import HookEvent, dispatch_hooks
+from cc_python.mcp import MCPManager
 from cc_python.messages import create_assistant_message, create_user_message
 from cc_python.permissions import (
     PermissionBehavior,
@@ -27,6 +29,7 @@ from cc_python.permissions import (
     build_permission_context,
 )
 from cc_python.session import SessionStorage, list_sessions, load_session
+from cc_python.skills import discover_and_load_skills
 from cc_python.tools import get_all_tools
 
 DEFAULT_MODEL = "claude-sonnet-4-20250514"
@@ -169,14 +172,22 @@ async def _async_single_prompt(prompt: str, model: str) -> None:
         session_id=storage.session_id or "",
     )
 
+    # 初始化 MCP
+    mcp_manager = MCPManager()
+    await mcp_manager.discover_and_connect()
+
+    # 加载 skills
+    discover_and_load_skills()
+
     client, client_format = create_client()
-    tools = get_all_tools()
+    tools = get_all_tools(mcp_manager=mcp_manager)
     enabled_tools = {t.name for t in tools}
     permission_context = build_permission_context()
 
     system_prompt = build_system_prompt(
         model=model,
         enabled_tools=enabled_tools,
+        mcp_manager=mcp_manager,
     )
 
     # UserPromptSubmit Hook
@@ -270,25 +281,40 @@ async def _async_interactive(model: str, resume_session_id: str | None = None) -
         session_id=storage.session_id or "",
     )
 
+    # 初始化 MCP
+    mcp_manager = MCPManager()
+    await mcp_manager.discover_and_connect()
+
+    # 加载 skills
+    discover_and_load_skills()
+
     client, client_format = create_client()
-    tools = get_all_tools()
+    tools = get_all_tools(mcp_manager=mcp_manager)
     enabled_tools = {t.name for t in tools}
     permission_context = build_permission_context()
 
     system_prompt = build_system_prompt(
         model=model,
         enabled_tools=enabled_tools,
+        mcp_manager=mcp_manager,
     )
     messages = list(history_messages)
+
+    # 构建 MCP 状态信息
+    mcp_info = ""
+    if mcp_manager.is_connected:
+        mcp_tools = mcp_manager.get_tools()
+        if mcp_tools:
+            mcp_info = f"\nMCP: {len(mcp_tools)} 工具 ({', '.join(t['full_name'] for t in mcp_tools[:3])}{'...' if len(mcp_tools) > 3 else ''})"
 
     console.print(
         Panel(
             Text.from_markup(
                 f"[bold]Claude Code (Python)[/] — model: {model}\n"
-                f"工具: {', '.join(t.name for t in tools)}\n"
+                f"工具: {', '.join(t.name for t in tools[:6])}{'...' if len(tools) > 6 else ''}\n"
                 f"权限模式: {permission_context.mode.value}\n"
-                f"会话: {storage.session_id[:8] if storage.session_id else 'N/A'}...\n"
-                f"输入消息开始对话，Ctrl+C 退出"
+                f"会话: {storage.session_id[:8] if storage.session_id else 'N/A'}...{mcp_info}\n"
+                f"输入消息开始对话，/help 查看命令，Ctrl+C 退出"
             ),
             border_style="blue",
         )
@@ -305,9 +331,45 @@ async def _async_interactive(model: str, resume_session_id: str | None = None) -
             if not user_input.strip():
                 continue
 
-            if user_input.strip().lower() in ("/exit", "/quit", "exit", "quit"):
-                console.print("[dim]再见！[/]")
-                break
+            # ── Slash 命令处理 ──
+            parsed = parse_slash_command(user_input)
+            if parsed:
+                cmd_name, cmd_args = parsed
+                cmd_context = {
+                    "messages": messages,
+                    "system_prompt": system_prompt,
+                    "client": client,
+                    "client_format": client_format,
+                    "model": model,
+                    "mcp_manager": mcp_manager,
+                }
+                result = await dispatch_command(cmd_name, cmd_args, cmd_context)
+
+                if result.exit_repl:
+                    console.print("[dim]再见！[/]")
+                    break
+
+                if result.output:
+                    console.print()
+                    console.print(Markdown(result.output))
+
+                if result.new_messages is not None:
+                    if len(result.new_messages) == 0:
+                        # /clear：清除消息
+                        messages.clear()
+                        console.print("[dim]对话已清除[/]")
+                    else:
+                        messages = result.new_messages
+
+                if result.should_query:
+                    # 命令要求发送给模型（如 /compact 后的摘要）
+                    pass
+
+                console.print()
+                console.rule()
+                continue
+
+            # ── 正常对话处理 ──
 
             # UserPromptSubmit Hook
             hook_results = await dispatch_hooks(
@@ -354,6 +416,9 @@ async def _async_interactive(model: str, resume_session_id: str | None = None) -
         except KeyboardInterrupt:
             console.print("\n[dim]再见！[/]")
             break
+
+    # 清理 MCP 连接
+    await mcp_manager.shutdown()
 
 
 @click.command()

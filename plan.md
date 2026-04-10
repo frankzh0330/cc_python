@@ -12,7 +12,7 @@
 | 6. 上下文压缩 | 对话过长时自动压缩历史消息 | ✅ 已完成 |
 | 7. Message + Attachments 增强 | 消息规范化 + 附件处理 | 🔲 未实现 |
 | 8. 高级工具 | Agent/Task/AskUserQuestion | 🔲 未实现 |
-| 9. MCP + Skills + Commands | MCP 集成、Skill 系统、Slash 命令 | 🔲 未实现 |
+| 9. MCP + Skills + Commands | MCP 集成、Skill 系统、Slash 命令 | ✅ 已完成 |
 
 ---
 

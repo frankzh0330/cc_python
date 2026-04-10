@@ -12,6 +12,7 @@ import os
 import platform
 import subprocess
 from pathlib import Path
+from typing import Any
 
 
 def get_system_context() -> dict[str, str]:
@@ -320,14 +321,19 @@ def get_language_section(language: str | None = None) -> str | None:
     )
 
 
-def get_mcp_instructions_section() -> str | None:
+def get_mcp_instructions_section(mcp_manager: Any = None) -> str | None:
     """对应 TS getMcpInstructionsSection()。
 
-    MCP Server 使用说明。当前 Python 版未实现 MCP 连接管理，
-    预留接口，返回 None。
+    从连接的 MCP Server 获取 instructions，注入 System Prompt。
     """
-    # TODO: 实现 MCP 客户端连接管理后，从连接中提取 instructions
-    return None
+    if mcp_manager is None:
+        return None
+
+    instructions = mcp_manager.get_instructions()
+    if not instructions:
+        return None
+
+    return f"# MCP Server Instructions\n\nThe following instructions are provided by connected MCP servers:\n\n{instructions}"
 
 
 def get_summarize_tool_results_section() -> str:
@@ -380,6 +386,7 @@ def build_system_prompt(
     model: str = "",
     enabled_tools: set[str] | None = None,
     language: str | None = None,
+    mcp_manager: Any = None,
 ) -> str:
     """构建完整 system prompt。
 
@@ -465,7 +472,7 @@ def build_system_prompt(
         parts.append(lang_section)
 
     # 12. MCP instructions
-    mcp_section = get_mcp_instructions_section()
+    mcp_section = get_mcp_instructions_section(mcp_manager)
     if mcp_section:
         parts.append("")
         parts.append(mcp_section)

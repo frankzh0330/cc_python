@@ -333,6 +333,7 @@ async def auto_compact_if_needed(
     client_format: str,
     model: str,
     context_window: int = CONTEXT_WINDOW_DEFAULT,
+    force: bool = False,
 ) -> list[dict]:
     """自动压缩入口。
 
@@ -341,11 +342,14 @@ async def auto_compact_if_needed(
     1. 估算 token → 未超阈值 → 直接返回
     2. 超阈值 → micro_compact → 再检查
     3. 仍超阈值 → full_compact
+
+    Args:
+        force: 强制压缩（忽略阈值检查，用于 /compact 命令）
     """
     threshold = int(context_window * COMPACT_THRESHOLD_RATIO)
 
     tokens = estimate_tokens(messages, system_prompt)
-    if tokens < threshold:
+    if not force and tokens < threshold:
         return messages
 
     logger.info(
