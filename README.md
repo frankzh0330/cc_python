@@ -700,8 +700,8 @@ UserPromptSubmit Hook 的反馈通过 `<user-prompt-submit-hook>` 标签注入�
 - [x] Skills 系统（磁盘加载 + frontmatter 解析 + SkillTool）
 - [x] Slash Commands（/help /compact /clear /config /skills /mcp /exit）
 - [x] Message + Attachments（消息规范化 + 工具结果存储 + 文件附件）
-- [ ] Agent 工具（子代理系统）
-- [ ] Task 工具（任务管理）
+- [x] Agent 工具（Explore/Plan/general-purpose 子代理）
+- [x] Task 工具组（Create/Update/List/Get）
 - [ ] Message + Attachments 增强
 
 ## 依赖

@@ -32,6 +32,28 @@ def get_all_tools(mcp_manager: Any | None = None) -> list[Tool]:
         GrepTool(),
     ]
 
+    # 高级工具（Phase 8）
+    from cc_python.tools.ask_user import AskUserQuestionTool
+    from cc_python.tools.agent import AgentTool
+    from cc_python.tools.task import (
+        TaskCreateTool, TaskUpdateTool, TaskListTool, TaskGetTool,
+    )
+    from cc_python.tools.enter_plan import EnterPlanModeTool
+    from cc_python.tools.exit_plan import ExitPlanModeTool
+    from cc_python.tools.notebook_edit import NotebookEditTool
+
+    tools.extend([
+        AskUserQuestionTool(),
+        AgentTool(),
+        TaskCreateTool(),
+        TaskUpdateTool(),
+        TaskListTool(),
+        TaskGetTool(),
+        EnterPlanModeTool(),
+        ExitPlanModeTool(),
+        NotebookEditTool(),
+    ])
+
     # MCP 工具
     if mcp_manager and mcp_manager.is_connected:
         from cc_python.tools.mcp_tool import create_mcp_tools

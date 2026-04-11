@@ -58,7 +58,7 @@ src/cc_python/
 | 5. CLAUDE.md 读取注入 | ✅ |
 | 6. 上下文压缩 | ✅ |
 | 7. Message + Attachments | ✅ |
-| 8. 高级工具（Agent/Task/Plan） | 待实现 |
+| 8. 高级工具（Agent/Task/Plan） | ✅ |
 | 9. MCP + Skills + Commands | ✅ |
 
 ## TS 源码位置

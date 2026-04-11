@@ -278,7 +278,12 @@ def get_session_guidance_section(enabled_tools: set[str] | None = None) -> str |
     if "ask_user_question" in enabled_tools:
         items.append(
             "If you do not understand why the user has denied a tool call, use "
-            "the AskUserQuestion to ask them."
+            "the AskUserQuestion tool to ask them."
+        )
+        items.append(
+            "Use AskUserQuestion to clarify requirements, gather preferences, "
+            "or get decisions on implementation choices. Users can always provide "
+            "custom text input beyond the listed options."
         )
 
     # Shell 命令建议
