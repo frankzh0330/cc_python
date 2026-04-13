@@ -111,6 +111,17 @@ def get_all_commands() -> list[Command]:
     return result
 
 
+def _looks_like_command(name: str) -> bool:
+    """判断字符串是否像合法命令名。
+
+    对应 TS: processSlashCommand.tsx looksLikeCommand()。
+    合法字符：字母、数字、冒号、连字符、下划线。
+    包含其他字符（如 / . 等）则可能是文件路径。
+    """
+    import re
+    return not bool(re.search(r"[^a-zA-Z0-9:\-_]", name))
+
+
 async def dispatch_command(
     name: str,
     args: str,
@@ -119,21 +130,51 @@ async def dispatch_command(
     """分派命令执行。
 
     对应 TS: processSlashCommand.tsx 中的命令执行逻辑。
+
+    查找优先级（与 TS 对齐）：
+    1. 内置命令（help, compact, clear 等）
+    2. Skill 回退（/review → 查找 skill "review"）
+    3. 未知命令
     """
+    # 1. 查找内置命令
     cmd = find_command(name)
-    if not cmd:
-        logger.debug("unknown command: /%s", name)
+    if cmd:
+        try:
+            result = await cmd.handler(args, context or {})
+            logger.debug("command /%s completed: output=%d chars, exit_repl=%s", name, len(result.output), result.exit_repl)
+            return result
+        except Exception as e:
+            logger.debug("command /%s error: %s", name, e)
+            return CommandResult(output=f"Command error: {e}")
+
+    # 2. Skill 回退（对应 TS: hasCommand → getCommand 查找 prompt 类型命令）
+    from cc_python.skills import find_skill
+    skill = find_skill(name)
+    if skill:
+        # 检查 userInvocable（对应 TS: command.userInvocable === false 的处理）
+        if not skill.user_invocable:
+            return CommandResult(
+                output=f'This skill can only be invoked by Claude, not directly by users. '
+                       f'Ask Claude to use the "{name}" skill for you.',
+            )
+
+        prompt = skill.get_prompt(args)
+        logger.debug("skill /%s invoked: prompt=%d chars", name, len(prompt))
+        return CommandResult(
+            output=prompt,
+            should_query=True,
+        )
+
+    # 3. 未知命令（对应 TS: looksLikeCommand 检查）
+    logger.debug("unknown command: /%s", name)
+    if _looks_like_command(name):
         return CommandResult(
             output=f"Unknown command: /{name}\nType /help for available commands.",
         )
-
-    try:
-        result = await cmd.handler(args, context or {})
-        logger.debug("command /%s completed: output=%d chars, exit_repl=%s", name, len(result.output), result.exit_repl)
-        return result
-    except Exception as e:
-        logger.debug("command /%s error: %s", name, e)
-        return CommandResult(output=f"Command error: {e}")
+    # 看起来像文件路径，提示用户
+    return CommandResult(
+        output=f"Unknown command: /{name}\n(Did you mean to type this without the / prefix?)",
+    )
 
 
 # ── 内置命令实现 ──────────────────────────────────────────
@@ -151,8 +192,14 @@ async def _cmd_help(args: str, ctx: dict) -> CommandResult:
         hint = f" {cmd.argument_hint}" if cmd.argument_hint else ""
         lines.append(f"  /{cmd.name}{hint}{aliases} — {cmd.description}")
 
-    lines.append("")
-    lines.append("Tip: You can also invoke skills via /skill-name")
+    # 列出 user-invocable skills（对应 TS: 命令和 skill 统一展示）
+    from cc_python.skills import get_all_skills
+    skills = [s for s in get_all_skills() if s.user_invocable]
+    if skills:
+        lines.append("")
+        lines.append("Available skills:")
+        for skill in sorted(skills, key=lambda s: s.name):
+            lines.append(f"  /{skill.name} — {skill.description}")
 
     return CommandResult(output="\n".join(lines))
 

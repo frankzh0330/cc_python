@@ -388,8 +388,26 @@ async def _async_interactive(model: str, resume_session_id: str | None = None) -
                         messages = result.new_messages
 
                 if result.should_query:
-                    # 命令要求发送给模型（如 /compact 后的摘要）
-                    pass
+                    # 命令要求发送给模型（skill 回退、/compact 后的摘要等）
+                    # 将 skill prompt 作为用户消息发送，让 LLM 按指令执行
+                    messages.append(create_user_message(result.output))
+                    storage.record_user_message(result.output)
+                    logger.debug("should_query: sending skill/command output to API, %d messages", len(messages))
+
+                    full_response = await _stream_response_with_tools(
+                        client, client_format, model, system_prompt, messages, tools, storage,
+                        permission_context=permission_context,
+                        session_id=storage.session_id or "",
+                    )
+                    messages.append({**create_assistant_message(full_response), "_timestamp": time.time()})
+                    storage.record_assistant_message(full_response)
+
+                    # Stop Hook
+                    await dispatch_hooks(
+                        event=HookEvent.STOP,
+                        session_id=storage.session_id or "",
+                        stop_hook_active=True,
+                    )
 
                 console.print()
                 console.rule()

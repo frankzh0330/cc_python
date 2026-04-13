@@ -230,8 +230,8 @@ cli.py: parse_slash_command()
       ▼
   dispatch_command(name, args, context)
       │
-      ├─ 找到内置命令 → 执行 handler
-      │   ├─ /help → 打印命令列表
+      ├─ 1. 内置命令 → 执行 handler
+      │   ├─ /help → 打印命令列表（含 skill 列表）
       │   ├─ /compact → 调用 auto_compact_if_needed(force=True)
       │   ├─ /clear → 返回空消息列表
       │   ├─ /config → 显示配置（API key 脱敏）
@@ -239,8 +239,28 @@ cli.py: parse_slash_command()
       │   ├─ /mcp → 显示 MCP 状态
       │   └─ /exit → 设置 exit_repl 标志
       │
-      └─ 未找到 → 提示 "Unknown command"
+      ├─ 2. Skill 回退 → find_skill(name)
+      │   ├─ user_invocable=True  → 返回 prompt + should_query=True
+      │   │   → cli.py 将 prompt 发送给 LLM，LLM 按指令执行
+      │   └─ user_invocable=False → 提示 "只能由 Claude 调用"
+      │
+      └─ 3. 未找到 → "Unknown command"
+          ├─ 合法命令名 → "Type /help"
+          └─ 像文件路径 → "Did you mean without /?"
 ```
+
+### `/help` 输出
+
+`/help` 会同时展示内置命令和 user-invocable skills，与 TS 版行为一致。
+
+### Skill 回退（对应 TS hasCommand → getCommand）
+
+TS 版中 skill 和 command 是同一个体系：skill 在加载时被注册为 `type: 'prompt'` 的 Command，
+`getCommand("review")` 能直接找到 skill。Python 版通过 `dispatch_command` 的三层查找实现等效逻辑：
+
+1. 先查内置命令表（`_commands`）
+2. 再查 skill 注册表（`_skills`）
+3. 都没有才报 Unknown command
 
 ### CommandResult
 

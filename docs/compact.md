@@ -66,7 +66,9 @@ estimate_tokens() → ~N tokens
 | `CONTEXT_WINDOW_DEFAULT` | 200,000 | Claude Sonnet 默认上下文窗口 |
 | `COMPACT_THRESHOLD_RATIO` | 0.75 | 75% 时触发压缩（150,000 tokens） |
 | `COMPACT_TARGET_RATIO` | 0.50 | 压缩后目标 50%（100,000 tokens） |
-| `MICROCOMPACT_MAX_TOOL_RESULTS` | 10 | 每种工具最多保留最近 10 个结果 |
+| `MICROCOMPACT_MAX_TOOL_RESULTS` | 10 | count-based: 可清理工具最多保留最近 10 个结果 |
+| `TIME_BASED_MC_GAP_MINUTES` | 60 | time-based: 用户闲置超过 60 分钟触发 |
+| `TIME_BASED_MC_KEEP_RECENT` | 5 | time-based: 保留最近 5 个可清理工具结果 |
 
 可通过 `CLAUDE_CONTEXT_WINDOW` 环境变量配置上下文窗口大小。
 
@@ -76,23 +78,49 @@ estimate_tokens() → ~N tokens
 
 **对应 TS**: `services/compact/microCompact.ts`
 
-**策略**：清理旧的工具结果，不调用 LLM。
+**策略**：清理旧的工具结果，不调用 LLM。采用双路径设计（与 TS 对齐）：
+
+### 路径 1: Time-based（优先）
+
+**对应 TS**: `microCompact.ts maybeTimeBasedMicrocompact()`
+
+当用户闲置超过 `TIME_BASED_MC_GAP_MINUTES`（60 分钟）时触发。此时 Anthropic 服务端 prompt cache（TTL 1h）必然已过期，清理旧结果可以缩小重写量。
 
 ```
-遍历所有消息中的 tool_result content block
+评估 time-based 触发条件
   │
-  ├─ 收集所有 tool_result 位置
+  ├─ 检查最后一条 assistant 消息的 _timestamp
+  │   └─ 距今 >= 60 分钟 → 触发
+  │
+  ├─ 收集所有白名单内工具的 tool_use_id
+  │   （白名单 COMPACTABLE_TOOLS: read_file, bash, grep, glob）
+  │
+  └─ 清理除最近 5 个之外的所有白名单内工具结果
+      └─ 替换为 "[Old tool result content cleared] [tool=<name>]"
+```
+
+**特点**：比 count-based 更激进但更安全——闲置很久的旧结果大概率不再相关。
+
+### 路径 2: Count-based（兜底）
+
+基于数量的截断路径。只清理白名单内（只读/幂等）工具的结果，有副作用的工具（edit_file, write_file）不在白名单中。
+
+```
+收集所有白名单内 tool_result 的位置
   │
   ├─ 总数 <= 10 → 不压缩，直接返回
   │
   └─ 总数 > 10 → 截断较早的结果
-      └─ 旧结果内容 → "[tool_result truncated: N chars]"
+      └─ 旧结果内容 → "[tool_result truncated: N chars, tool=<name>]"
 ```
 
-**特点**：
-- 纯本地操作，无 API 调用
-- 保留最近 10 个工具结果的完整内容
-- 对话逻辑不受影响（工具调用和结果的结构保持不变）
+### 白名单设计
+
+`COMPACTABLE_TOOLS = {read_file, bash, grep, glob}`
+
+只包含只读/幂等工具，它们的结果丢失后可以通过重新执行找回。`edit_file` / `write_file` 等有副作用的工具不在此列：
+- 它们的 tool_use 参数里包含完整操作信息（old_string/new_string 等），模型需要这些信息来理解做了什么修改
+- 清理结果可能丢失错误信息（如编辑冲突），导致模型重复犯错
 
 ---
 

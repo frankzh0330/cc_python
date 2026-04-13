@@ -40,7 +40,7 @@ src/cc_python/
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 模块分层、依赖方向、数据流 |
 | [docs/golden-rules.md](docs/golden-rules.md) | 机械化的编码规则 |
 | [docs/conventions.md](docs/conventions.md) | 命名、模式、文件组织规范 |
-| [plan.md](plan.md) | 9 阶段开发计划 + TS 源码映射 |
+| [plan.md](plan.md) | 10 阶段开发计划 + TS 源码映射 |
 | [docs/hooks.md](docs/hooks.md) | Hooks 系统详解 |
 | [docs/claudemd.md](docs/claudemd.md) | CLAUDE.md 加载系统详解 |
 | [docs/compact.md](docs/compact.md) | 上下文压缩系统详解 |
