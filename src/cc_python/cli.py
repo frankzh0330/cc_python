@@ -186,6 +186,11 @@ async def _async_single_prompt(prompt: str, model: str) -> None:
     storage.start_session()
     logger.debug("session started: %s", storage.session_id)
 
+    # 初始化 Undo 系统
+    from cc_python.undo import init_undo, cleanup_stale_snapshots
+    init_undo(storage.session_id)
+    cleanup_stale_snapshots()
+
     # SessionStart Hook
     await dispatch_hooks(
         event=HookEvent.SESSION_START,
@@ -318,6 +323,11 @@ async def _async_interactive(model: str, resume_session_id: str | None = None) -
         history_messages = []
         storage.start_session()
         logger.debug("new session: %s", storage.session_id)
+
+    # 初始化 Undo 系统
+    from cc_python.undo import init_undo, cleanup_stale_snapshots
+    init_undo(storage.session_id)
+    cleanup_stale_snapshots()
 
     # SessionStart Hook
     await dispatch_hooks(

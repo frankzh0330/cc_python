@@ -82,7 +82,8 @@ class EditFileTool:
 
         # 修改前保存快照（用于 /undo 回退）
         from cc_python.undo import save_snapshot
-        save_snapshot(file_path)
+        save_snapshot(file_path, operation="edit_file",
+                      old_string=old_string, new_string=new_string)
 
         def _edit() -> str:
             content = path.read_text(encoding="utf-8")

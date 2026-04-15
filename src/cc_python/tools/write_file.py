@@ -65,7 +65,7 @@ class WriteFileTool:
 
         # 修改前保存快照（用于 /undo 回退）
         from cc_python.undo import save_snapshot
-        save_snapshot(file_path)
+        save_snapshot(file_path, operation="write_file")
 
         def _write() -> str:
             path.parent.mkdir(parents=True, exist_ok=True)
