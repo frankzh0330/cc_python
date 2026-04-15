@@ -335,7 +335,7 @@ has_permission_to_use_tool(tool, input):
 | `tools/GrepTool/` | ~300 | `tools/grep_tool.py` | 1 ✅ |
 | `services/tools/toolOrchestration.ts` | ~188 | `api.py` 并发部分 | 1 ✅ |
 | `constants/prompts.ts` | ~800 | `context.py` | 2 ✅ |
-| `utils/permissions/` | ~8000 | `permissions.py` | 3 🔲 |
+| `utils/permissions/` | ~8000 | `permissions.py` | 3 ✅ |
 | `hooks/useCanUseTool.tsx` | ~203 | `permissions.py` | 3 🔲 |
 | `utils/hooks.ts` | ~5022 | `hooks.py` | 4 🔲 |
 | `services/tools/toolHooks.ts` | ~300 | `hooks.py` | 4 🔲 |
@@ -500,43 +500,45 @@ has_permission_to_use_tool(tool, input):
 
 > 对齐 TS 版关键差距，决定 Python 版是否可作为长期使用的 agent。
 
-### 11.1 子代理递归工具调用（进行中）
+### 11.1 子代理递归工具调用 ✅
 
 | | Python 当前 | TS 版 |
 |---|---|---|
-| 子代理能力 | 单次 API 调用，忽略 tool_use | 完整的 query_with_tools 循环 |
-| 工具使用 | 不能 | 可以调工具 → 拿结果 → 再调 → 循环 |
-| 实际效果 | 退化成单轮问答 | 独立完成复杂任务 |
+| 子代理能力 | 完整的 query_with_tools 循环 | 完整的 query_with_tools 循环 |
+| 工具使用 | 可以调工具 → 拿结果 → 再调 → 循环 | 同左 |
+| 实际效果 | 独立完成复杂任务 | 同左 |
 
-**改动**：修改 `src/cc_python/tools/agent.py` 的 `_run_agent()`，复用 `api.py` 的 `query_with_tools()` 替代当前的单次 API 调用。
+**改动**：`tools/agent.py` 的 `_run_agent()` 复用 `api.py` 的 `query_with_tools()`，支持递归工具调用。
 
-### 11.2 会话恢复链回溯 🔲
-
-| | Python 当前 | TS 版 |
-|---|---|---|
-| 恢复方式 | 顺序读 JSONL | parentUuid 链回溯 |
-| 分叉/分支 | 不支持 | buildConversationChain + createFork |
-| 并行工具结果 | 不处理 | recoverOrphanedParallelToolResults |
-
-**改动**：增强 `session.py` 的 `load_session()`，用 parentUuid 构建链回溯，支持分叉会话。
-
-### 11.3 Undo 持久化与精细化 🔲
+### 11.2 会话恢复链回溯 ✅
 
 | | Python 当前 | TS 版 |
 |---|---|---|
-| 方式 | 内存整文件快照 | 磁盘持久化 patch/diff |
-| 持久化 | 重启丢失 | 持久 |
-| 粒度 | 整个文件 | hunk 级别变更 |
+| 恢复方式 | parentUuid 链回溯 | parentUuid 链回溯 |
+| 分叉/分支 | buildConversationChain | buildConversationChain + createFork |
+| 并行工具结果 | recoverOrphanedEntries | recoverOrphanedParallelToolResults |
 
-**改动**：将快照持久化到磁盘，支持重启后回退。精细到行级变更而非整文件。
+**改动**：`session.py` 的 `load_session()` 用 parentUuid 链回溯 + 孤儿工具结果恢复。
 
-### 11.4 权限系统完善 🔲
+### 11.3 Undo 持久化与精细化 ✅
 
 | | Python 当前 | TS 版 |
 |---|---|---|
-| 代码量 | ~400 行 | ~8000 行 / 24 文件 |
-| 规则解析 | 简单前缀匹配 | 完整 regex + 语法校验 |
-| Bash 分类 | 基础危险命令 | 13+ 模式精细分类 |
-| 路径安全 | 基础检查 | 完整路径验证链 |
+| 方式 | 磁盘持久化 JSONL 快照 | 磁盘持久化 patch/diff |
+| 持久化 | 重启后仍可回退 | 同左 |
+| 粒度 | 整文件（含 edit 的 old/new string） | hunk 级别变更 |
 
-**改动**：增强 `permissions.py` 的规则解析、Bash 分类和路径安全检查。
+**改动**：`undo.py` 快照持久化到 `~/.claude/undo/session-*.jsonl`，支持进程重启后回退。
+
+### 11.4 权限系统完善 ✅
+
+| | Python 当前 | TS 版 |
+|---|---|---|
+| 代码量 | ~550 行 | ~8000 行 / 24 文件 |
+| 规则解析 | 通配符匹配（wildcard→regex） | 完整 regex + 语法校验 |
+| Bash 分类 | 32 模式 + 40 安全前缀 + 严重级别 | 13+ 模式精细分类 |
+| 路径安全 | 穿越检测 + 受保护文件/目录 + Shell 展开 | 完整路径验证链 |
+| 规则来源 | 6 级优先级（cli/session/local/project/user/policy） | 同左 |
+| 安全工具 | 12 个（只读 + 元数据 + MCP 只读） | 20+ |
+
+**改动**：增强 `permissions.py` 的规则解析、Bash 分类、路径安全检查、工具白名单、规则来源优先级。
