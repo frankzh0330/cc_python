@@ -1,5 +1,7 @@
 """commands.py 测试。"""
 
+from types import SimpleNamespace
+
 import pytest
 
 from termpilot.commands import (
@@ -102,3 +104,56 @@ class TestDispatchCommands:
     async def test_mcp_no_manager(self):
         result = await dispatch_command("mcp", "")
         assert "not initialized" in result.output.lower()
+
+    @pytest.mark.asyncio
+    async def test_model(self, monkeypatch):
+        called = {"picker": False, "refresh": False}
+
+        def fake_picker():
+            called["picker"] = True
+            return {"changed": True, "model": "gpt-4o", "provider": "openai"}
+
+        def fake_refresh():
+            called["refresh"] = True
+            return "gpt-4o"
+
+        monkeypatch.setattr("termpilot.config.run_model_picker", fake_picker)
+        result = await dispatch_command("model", "", {"refresh_runtime": fake_refresh})
+
+        assert called["picker"] is True
+        assert called["refresh"] is True
+        assert result.output == "Switched model to gpt-4o"
+
+    @pytest.mark.asyncio
+    async def test_model_cancelled(self, monkeypatch):
+        def fake_picker():
+            return {"changed": False, "model": "glm-5.1", "provider": "zhipu"}
+
+        monkeypatch.setattr("termpilot.config.run_model_picker", fake_picker)
+        result = await dispatch_command("model", "", {})
+
+        assert result.output == "Kept model as glm-5.1"
+
+    @pytest.mark.asyncio
+    async def test_compact_no_meaningful_reduction(self, monkeypatch):
+        async def fake_auto_compact(messages, system_prompt, client, model, **kwargs):
+            return messages
+
+        monkeypatch.setattr("termpilot.compact.auto_compact_if_needed", fake_auto_compact)
+        monkeypatch.setattr("termpilot.compact.estimate_tokens", lambda messages, system_prompt: 12_547)
+
+        result = await dispatch_command(
+            "compact",
+            "",
+            {
+                "messages": [{"role": "user", "content": "hi"}],
+                "system_prompt": "",
+                "client": SimpleNamespace(),
+                "model": "gpt-4o",
+                "client_format": "openai",
+            },
+        )
+
+        assert result.should_query is False
+        assert result.new_messages is None
+        assert "Context not compacted" in result.output

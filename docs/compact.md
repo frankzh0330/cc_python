@@ -37,6 +37,8 @@ Important constants in the current implementation:
 - target after full compaction: about `50%` of the context window
 - token heuristic: about `3 characters ≈ 1 token`
 
+The context window can also be overridden with `TERMPILOT_CONTEXT_WINDOW`.
+
 ## Micro-Compaction
 
 Micro-compaction clears old `tool_result` payloads while keeping the surrounding conversation structure intact.

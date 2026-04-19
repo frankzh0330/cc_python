@@ -71,6 +71,7 @@ Skills 是轻量级可复用 prompt 模板，来自带 frontmatter 的 Markdown 
 - `/clear`
 - `/config`
 - `/details`
+- `/model`
 - `/skills`
 - `/mcp`
 - `/undo`

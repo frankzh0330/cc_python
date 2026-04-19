@@ -140,6 +140,6 @@ class TestGetContextWindow:
         assert get_context_window() == 200_000
 
     def test_env_override(self, tmp_settings, env_clean, monkeypatch):
-        monkeypatch.setenv("CLAUDE_CONTEXT_WINDOW", "100000")
+        monkeypatch.setenv("TERMPILOT_CONTEXT_WINDOW", "100000")
         from termpilot.config import get_context_window
         assert get_context_window() == 100_000

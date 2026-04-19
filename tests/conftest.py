@@ -81,6 +81,6 @@ def env_clean(monkeypatch):
     """清除相关环境变量。"""
     for key in [
         "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ZHIPU_API_KEY",
-        "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL", "CLAUDE_CONTEXT_WINDOW",
+        "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL", "TERMPILOT_CONTEXT_WINDOW",
     ]:
         monkeypatch.delenv(key, raising=False)
