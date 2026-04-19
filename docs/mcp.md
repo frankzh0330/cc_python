@@ -71,6 +71,7 @@ Current builtin set includes:
 - `/clear`
 - `/config`
 - `/details`
+- `/model`
 - `/skills`
 - `/mcp`
 - `/undo`

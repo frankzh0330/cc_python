@@ -137,6 +137,7 @@ termpilot -s <session-id>
 | `/compact` | Trigger manual context compaction |
 | `/clear` | Clear conversation history |
 | `/config` | Show effective configuration |
+| `/model` | Switch the active model for the current provider |
 | `/skills` | List available skills |
 | `/mcp` | Show MCP server status |
 | `/undo` | Restore the previous file snapshot |

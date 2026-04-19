@@ -407,6 +407,18 @@ async def _async_interactive(model: str, resume_session_id: str | None = None) -
     cost_tracker = CostTracker()
     title_generated = False  # 首轮对话后生成标题
 
+    def refresh_runtime() -> str:
+        nonlocal client, client_format, model, system_prompt
+        client, client_format = create_client()
+        model = get_effective_model(DEFAULT_MODEL)
+        system_prompt = build_system_prompt(
+            model=model,
+            enabled_tools=enabled_tools,
+            mcp_manager=mcp_manager,
+        )
+        logger.debug("runtime refreshed after /model: model=%s, format=%s", model, client_format)
+        return model
+
     console.print(
         Panel(
             Text.from_markup(
@@ -463,6 +475,7 @@ async def _async_interactive(model: str, resume_session_id: str | None = None) -
                     "mcp_manager": mcp_manager,
                     "ui": ui,
                     "client_format": client_format,
+                    "refresh_runtime": refresh_runtime,
                 }
                 result = await dispatch_command(cmd_name, cmd_args, cmd_context)
                 logger.debug("command result: exit_repl=%s, should_query=%s, output=%d chars",
@@ -699,6 +712,13 @@ def main(ctx: click.Context, prompt: str | None, model: str | None, resume: bool
 
 @main.command(name="model")
 def model_cmd() -> None:
+    """Configure LLM provider and model interactively."""
+    from termpilot.config import run_setup_wizard
+    run_setup_wizard()
+
+
+@main.command(name="setup")
+def setup_cmd() -> None:
     """Configure LLM provider and API key interactively."""
     from termpilot.config import run_setup_wizard
     run_setup_wizard()

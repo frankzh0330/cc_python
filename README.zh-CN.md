@@ -137,6 +137,7 @@ termpilot -s <session-id>
 | `/compact` | 手动触发上下文压缩 |
 | `/clear` | 清除对话历史 |
 | `/config` | 显示当前配置 |
+| `/model` | 切换当前 Provider 下的模型 |
 | `/skills` | 列出可用 skills |
 | `/mcp` | 显示 MCP 服务器状态 |
 | `/undo` | 恢复上一次文件快照 |

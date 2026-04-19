@@ -170,6 +170,64 @@ _PROVIDERS: dict[str, dict[str, Any]] = {
     },
 }
 
+_MODEL_PRESETS: dict[str, list[str]] = {
+    "anthropic": [
+        "claude-opus-4-7",
+        "claude-sonnet-4-6",
+        "claude-haiku-4-5-20251001",
+    ],
+    "openai": [
+        "gpt-4o",
+        "gpt-4.1",
+        "gpt-4.1-mini",
+    ],
+    "zhipu": [
+        "glm-5.1",
+        "glm-4.5",
+        "glm-4.5-air",
+    ],
+    "deepseek": [
+        "deepseek-chat",
+        "deepseek-reasoner",
+    ],
+    "qwen": [
+        "qwen-plus",
+        "qwen-max",
+        "qwen-turbo",
+    ],
+    "moonshot": [
+        "moonshot-v1-8k",
+        "moonshot-v1-32k",
+        "moonshot-v1-128k",
+    ],
+    "siliconflow": [
+        "Qwen/Qwen2.5-7B-Instruct",
+        "deepseek-ai/DeepSeek-V3",
+    ],
+    "openrouter": [
+        "openai/gpt-4o",
+        "anthropic/claude-sonnet-4",
+    ],
+    "groq": [
+        "llama-3.3-70b-versatile",
+        "mixtral-8x7b-32768",
+    ],
+    "together": [
+        "meta-llama/Llama-3-70b-chat-hf",
+        "deepseek-ai/DeepSeek-V3",
+    ],
+    "fireworks": [
+        "accounts/fireworks/models/llama-v3p1-70b-chat",
+    ],
+    "ollama": [
+        "llama3",
+        "qwen2.5",
+        "deepseek-r1",
+    ],
+    "vllm": [],
+    "openai_compatible": [],
+}
+
 
 def get_config_home() -> Path:
     """获取 TermPilot 配置根目录。
@@ -207,40 +265,63 @@ def ensure_settings_template() -> bool:
 
 
 def run_setup_wizard() -> None:
-    """交互式 provider 选择向导。"""
+    """交互式 provider 选择向导。
+
+    如果已有配置，默认选中当前 provider 并预填已有值。
+    ESC 时优雅退出（不 sys.exit）。
+    """
     import questionary
 
     settings_path = get_settings_path()
 
+    # 检测当前 provider → 作为默认选中项
+    raw_provider = _get_raw_provider(default="")
+    current_label = None
+    if raw_provider:
+        label, _ = _find_provider_info(raw_provider)
+        current_label = label
+
+    # 读取已有配置 → 预填值
+    existing_env = get_settings_env()
+
     choice = questionary.select(
         "Select your LLM provider:",
         choices=list(_PROVIDERS.keys()),
+        default=current_label,
     ).ask()
     if not choice:
-        sys.exit(0)
+        return
 
     info = _PROVIDERS[choice]
     env: dict[str, str] = {}
 
-    # Prompt for API key if needed
+    # Prompt for API key — 预填已有值
     env_key = info.get("env_key")
     if env_key:
+        existing_key = existing_env.get(env_key, "")
         api_key = questionary.text(
             f"Enter your {env_key}:",
+            default=existing_key,
         ).ask()
         if not api_key:
-            sys.exit(0)
+            return
         env[env_key] = api_key
 
-    # Prompt for base URL if custom or empty
+    # Prompt for base URL — 预填已有值
     base_url = info.get("base_url", "")
     if base_url == "":
+        existing_url = existing_env.get(
+            info.get("base_url_env_key") or f"{info['provider'].upper()}_BASE_URL", ""
+        )
         base_url = questionary.text(
             "Enter base URL (e.g. https://api.example.com/v1):",
+            default=existing_url,
         ).ask() or ""
 
-    # Prompt for model if not predefined
-    default_model = info.get("default_model", "")
+    # Prompt for model — 预填已有值或使用 provider 默认
+    model_env_key = info.get("model_env_key") or f"{info['provider'].upper()}_MODEL"
+    existing_model = existing_env.get(model_env_key, "")
+    default_model = existing_model or info.get("default_model", "")
     if not default_model:
         default_model = questionary.text(
             "Enter model name:",
@@ -279,6 +360,132 @@ def run_setup_wizard() -> None:
         ),
         border_style="green",
     ))
+
+
+def _get_raw_provider(default: str = "openai") -> str:
+    """获取未归一化的 provider 名称。"""
+    settings = get_settings()
+    env = get_settings_env()
+    provider = _first_nonempty(
+        os.environ.get("TERMPILOT_PROVIDER"),
+        env.get("TERMPILOT_PROVIDER"),
+        settings.get("provider"),
+        default,
+    )
+    return str(provider)
+
+
+def _find_provider_info(raw_provider: str) -> tuple[str, dict[str, Any]] | tuple[None, None]:
+    for label, info in _PROVIDERS.items():
+        if info["provider"] == raw_provider:
+            return label, info
+    return None, None
+
+
+def _model_env_keys_for_provider(raw_provider: str) -> list[str]:
+    """返回当前 provider 可能使用的模型键。"""
+    keys: list[str] = []
+    _, info = _find_provider_info(raw_provider)
+    if info:
+        model_env_key = info.get("model_env_key")
+        if model_env_key:
+            keys.append(model_env_key)
+        else:
+            keys.append(f"{raw_provider.upper()}_MODEL")
+
+    normalized = _normalize_provider(raw_provider)
+    if normalized == "anthropic":
+        keys.append("ANTHROPIC_MODEL")
+    elif normalized == "openai":
+        keys.append("OPENAI_MODEL")
+    else:
+        keys.append("TERMPILOT_MODEL")
+
+    # 去重，保持顺序
+    result: list[str] = []
+    seen: set[str] = set()
+    for key in keys:
+        if key and key not in seen:
+            seen.add(key)
+            result.append(key)
+    return result
+
+
+def save_model_selection(model: str, raw_provider: str | None = None) -> None:
+    """保存当前模型选择。"""
+    raw_provider = raw_provider or _get_raw_provider()
+    settings = get_settings()
+    env = settings.setdefault("env", {})
+    if not isinstance(env, dict):
+        env = {}
+        settings["env"] = env
+
+    settings["model"] = model
+    for key in _model_env_keys_for_provider(raw_provider):
+        env[key] = model
+
+    settings_path = get_settings_path()
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(
+        json.dumps(settings, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+
+def run_model_picker() -> dict[str, Any]:
+    """为当前 provider 选择模型。
+
+    返回:
+      {"changed": bool, "model": str, "provider": str}
+    """
+    import questionary
+
+    raw_provider = _get_raw_provider()
+    provider_label, _ = _find_provider_info(raw_provider)
+    current_model = get_effective_model()
+
+    presets = list(_MODEL_PRESETS.get(raw_provider, []))
+
+    # 构建 choice 列表：presets 原样展示，cursor 通过 default 定位
+    choices: list[Any] = []
+    seen: set[str] = set()
+
+    def add_choice(title: str, value: str) -> None:
+        if value in seen:
+            return
+        seen.add(value)
+        choices.append(questionary.Choice(title, value=value))
+
+    # 如果当前模型不在 presets 中，加到顶部
+    if current_model not in presets:
+        add_choice(current_model, current_model)
+
+    for preset in presets:
+        add_choice(preset, preset)
+
+    choices.append(questionary.Choice("Custom model…", value="__custom__"))
+
+    choice = questionary.select(
+        f"Select model for {provider_label or raw_provider}:",
+        choices=choices,
+        default=current_model,
+        use_shortcuts=False,
+    ).ask()
+
+    if not choice:
+        return {"changed": False, "model": current_model, "provider": raw_provider}
+
+    if choice == "__custom__":
+        custom_model = questionary.text(
+            "Enter model name:",
+            default=current_model,
+        ).ask()
+        if not custom_model:
+            return {"changed": False, "model": current_model, "provider": raw_provider}
+        choice = custom_model
+
+    save_model_selection(choice, raw_provider=raw_provider)
+    return {"changed": choice != current_model, "model": choice, "provider": raw_provider}
 
 
 def is_placeholder_key(key: str | None) -> bool:
@@ -559,7 +766,7 @@ def get_context_window() -> int:
     默认 200000。
     """
     return int(
-        os.environ.get("CLAUDE_CONTEXT_WINDOW", "")
-        or get_settings_env().get("CLAUDE_CONTEXT_WINDOW", "")
+        os.environ.get("TERMPILOT_CONTEXT_WINDOW", "")
+        or get_settings_env().get("TERMPILOT_CONTEXT_WINDOW", "")
         or "200000"
     )

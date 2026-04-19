@@ -233,12 +233,28 @@ async def _cmd_compact(args: str, ctx: dict) -> CommandResult:
         client_format=ctx.get("client_format", "openai"),
     )
 
+    if compacted == messages:
+        return CommandResult(
+            output="Context not compacted: no meaningful reduction available.",
+            should_query=False,
+        )
+
     tokens_after = estimate_tokens(compacted, system_prompt)
     saved = tokens_before - tokens_after
 
+    if saved <= 0:
+        return CommandResult(
+            output=(
+                "Context compacted, but estimated token usage did not decrease "
+                f"({tokens_before:,} → {tokens_after:,} tokens)."
+            ),
+            should_query=False,
+            new_messages=compacted,
+        )
+
     return CommandResult(
         output=f"Context compacted: {tokens_before:,} → {tokens_after:,} tokens (saved {saved:,})",
-        should_query=True,
+        should_query=False,
         new_messages=compacted,
     )
 
@@ -294,6 +310,29 @@ async def _cmd_config(args: str, ctx: dict) -> CommandResult:
             lines.append(f"    - {name} (sse): {config.get('url', '?')}")
 
     return CommandResult(output="\n".join(lines))
+
+
+async def _cmd_model(args: str, ctx: dict) -> CommandResult:
+    """交互式选择 provider 和模型。"""
+    import asyncio
+    from termpilot.config import get_effective_model, run_setup_wizard
+
+    old_model = get_effective_model()
+
+    try:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, run_setup_wizard)
+    except SystemExit:
+        return CommandResult(output=f"Kept model as {old_model}")
+
+    refresh_runtime = ctx.get("refresh_runtime")
+    if callable(refresh_runtime):
+        refresh_runtime()
+
+    new_model = get_effective_model()
+    if new_model != old_model:
+        return CommandResult(output=f"Switched model to {new_model}")
+    return CommandResult(output=f"Kept model as {new_model}")
 
 
 async def _cmd_details(args: str, ctx: dict) -> CommandResult:
@@ -618,6 +657,11 @@ def register_builtin_commands() -> None:
         name="config",
         description="Show current configuration",
         handler=_cmd_config,
+    ))
+    register_command(Command(
+        name="model",
+        description="Switch the active model",
+        handler=_cmd_model,
     ))
     register_command(Command(
         name="details",

@@ -37,6 +37,8 @@ config.py    → 提供上下文窗口大小
 - full compaction 目标：约 `50%`
 - token 估算：大约 `3 个字符 ≈ 1 个 token`
 
+上下文窗口也可以通过 `TERMPILOT_CONTEXT_WINDOW` 环境变量覆盖。
+
 ## Micro-Compaction
 
 micro-compaction 会清理旧的 `tool_result` 内容，但尽量保留消息结构本身。
