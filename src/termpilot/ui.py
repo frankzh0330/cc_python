@@ -129,8 +129,12 @@ class QuietUI:
         self._next_tool_index += 1
 
         status_text = "completed" if success else "failed"
+        display_name = name
+        if name == "agent":
+            subagent = input_data.get("subagent_type", "agent")
+            display_name = subagent
         header = Text()
-        header.append(f"{entry.index}. {name}", style="bold cyan")
+        header.append(f"{entry.index}. {display_name}", style="bold cyan")
         header.append(f"  {status_text}", style="green" if success else "red")
 
         body = Text()
@@ -154,6 +158,12 @@ def _status_for_tool(name: str, input_data: dict[str, Any]) -> str:
         return "Inspecting project files…"
     if name == "read_file":
         return "Reading key files…"
+    if name == "agent":
+        subagent = input_data.get("subagent_type", "")
+        desc = input_data.get("description", "")
+        if desc:
+            return f"Running {subagent} agent: {desc}…"
+        return f"Running {subagent} agent…"
     if name == "bash":
         command = str(input_data.get("command", "")).strip()
         lowered = command.lower()
@@ -180,6 +190,14 @@ def _tool_summary(name: str, input_data: dict[str, Any], result: str) -> str:
         return f"Wrote `{input_data.get('file_path', '')}`"
     if name == "edit_file":
         return f"Edited `{input_data.get('file_path', '')}`"
+    if name == "agent":
+        subagent = input_data.get("subagent_type", "agent")
+        desc = input_data.get("description", "")
+        prompt_text = input_data.get("prompt", "")
+        if desc:
+            return f"Executed `{subagent}` agent: {desc}"
+        snippet = _compact_text(prompt_text, limit=60)
+        return f"Executed `{subagent}` agent — {snippet}"
     if not result.strip():
         return f"Executed `{name}`"
     return f"Executed `{name}`"
@@ -195,6 +213,9 @@ def _preview_lines(name: str, result: str, success: bool) -> list[str]:
 
     if name in {"list_dir", "glob", "grep", "read_file"}:
         return lines[:6]
+
+    if name == "agent":
+        return lines[:8]
 
     if name == "bash":
         if _looks_like_listing(lines):

@@ -256,24 +256,27 @@ def get_session_guidance_section(enabled_tools: set[str] | None = None) -> str |
     # Agent 工具使用说明
     if "agent" in enabled_tools:
         items.append(
-            "Use the Agent tool with specialized agents when the task at hand "
-            "matches the agent's description. Subagents are valuable for "
-            "parallelizing independent queries or for protecting the main context "
-            "window from excessive results, but they should not be used excessively "
-            "when not needed. Importantly, avoid duplicating work that subagents "
-            "are already doing - if you delegate research to a subagent, do not "
-            "also perform the same searches yourself."
+            "For planning intent, use Agent with subagent_type=Plan. Planning intent "
+            "includes requests to plan, design, propose an approach, or add a feature "
+            "with an implementation strategy. This takes priority over exploration "
+            "guidance; the Plan agent can inspect the codebase before producing the plan."
         )
         items.append(
             "For simple, directed codebase searches (e.g. for a specific "
             "file/class/function) use the Glob or Grep directly."
         )
         items.append(
-            "For broader codebase exploration and deep research, use the Agent "
-            "tool with subagent_type=Explore. This is slower than using Glob or "
-            "Grep directly, so use this only when a simple, directed search proves "
-            "to be insufficient or when your task will clearly require more than "
-            "3 queries."
+            "For broader pure codebase exploration or research that'll take more than "
+            "3 queries, use Agent with subagent_type=Explore."
+        )
+        items.append(
+            "When you are searching for a keyword or file and are not confident that you "
+            "will find the right match in the first few tries, use the Agent tool with "
+            "subagent_type=Explore to perform the search for you."
+        )
+        items.append(
+            "For verification after non-trivial implementation work, use Agent with "
+            "subagent_type=Verification."
         )
 
     # AskUserQuestion 工具

@@ -1,7 +1,7 @@
 """Agent 工具（子代理系统）。
 
 对应 TS: tools/AgentTool/（~800 行）
-支持子代理：Explore（只读探索）、Plan（架构规划）、general-purpose（通用）。
+支持子代理：Explore（只读探索）、Plan（架构规划）、Verification（验证）、general-purpose（通用）。
 
 子代理在独立的上下文中运行，有自己的 system prompt 和工具集。
 主代理通过 Agent 工具委派任务给子代理，子代理返回结果。
@@ -15,12 +15,14 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from termpilot.config import get_config_home
+
 logger = logging.getLogger(__name__)
 
 # 内置代理类型
 BUILTIN_AGENTS = {
     "Explore": {
-        "description": "Fast agent specialized for exploring codebases. Use for finding files, searching code, and understanding project structure.",
+        "description": "Fast read-only agent specialized for pure codebase exploration, file discovery, code searches, and project structure analysis. Do not use for tasks where the user asks for a plan or implementation strategy.",
         "prompt": (
             "You are a file search specialist. You excel at thoroughly navigating and exploring codebases.\n\n"
             "CRITICAL: READ-ONLY MODE - NO FILE MODIFICATIONS\n"
@@ -37,7 +39,7 @@ BUILTIN_AGENTS = {
         "tools": ["read_file", "glob", "grep", "bash"],
     },
     "Plan": {
-        "description": "Software architect agent for designing implementation plans. Use for planning approach before coding.",
+        "description": "Software architect agent for designing implementation plans. Use this whenever the user asks to plan, design, or propose an implementation strategy, even if the plan requires exploring the codebase first. Returns step-by-step plans, identifies critical files, and considers architectural trade-offs.",
         "prompt": (
             "You are a software architect planning agent.\n\n"
             "Your job is to explore the codebase and create a detailed implementation plan.\n"
@@ -49,6 +51,22 @@ BUILTIN_AGENTS = {
             "4. Design the implementation approach step by step\n"
             "5. Consider architectural trade-offs\n\n"
             "Output a clear, step-by-step plan with file paths and specific changes."
+        ),
+        "tools": ["read_file", "glob", "grep", "bash"],
+    },
+    "Verification": {
+        "description": "Read-only verification agent for checking whether changes work as intended. Use after implementation work to inspect diffs, run tests, and identify regressions or missing coverage.",
+        "prompt": (
+            "You are a verification agent.\n\n"
+            "Your job is to verify whether recent implementation work is correct.\n"
+            "You may inspect files, review diffs, and run tests or read-only checks.\n"
+            "Do not modify files.\n\n"
+            "Approach:\n"
+            "1. Understand what changed and what behavior should be verified\n"
+            "2. Inspect relevant files and diffs\n"
+            "3. Run targeted tests or checks when appropriate\n"
+            "4. Report failures, risks, and missing coverage clearly\n\n"
+            "Output concise findings first, followed by commands/checks performed."
         ),
         "tools": ["read_file", "glob", "grep", "bash"],
     },
@@ -64,6 +82,50 @@ BUILTIN_AGENTS = {
 }
 
 
+def _load_custom_agents() -> dict[str, dict[str, Any]]:
+    """从 ~/.termpilot/agents/*.md 加载自定义 agent。"""
+    agents_dir = get_config_home() / "agents"
+    if not agents_dir.exists():
+        return {}
+
+    custom: dict[str, dict[str, Any]] = {}
+    for md_file in sorted(agents_dir.glob("*.md")):
+        try:
+            content = md_file.read_text(encoding="utf-8")
+            if not content.startswith("---"):
+                continue
+            end = content.find("---", 3)
+            if end == -1:
+                continue
+            frontmatter = content[3:end].strip()
+            body = content[end + 3:].strip()
+            meta: dict[str, str] = {}
+            for line in frontmatter.splitlines():
+                if ":" in line:
+                    key, _, value = line.partition(":")
+                    meta[key.strip()] = value.strip()
+            name = meta.get("name", md_file.stem)
+            description = meta.get("description", f"Custom agent: {name}")
+            tools_str = meta.get("tools", "")
+            tools = [t.strip() for t in tools_str.split(",") if t.strip()] or None
+            custom[name] = {
+                "description": description,
+                "prompt": body or f"You are a {name} agent. Complete the assigned task.",
+                "tools": tools,
+            }
+            logger.debug("loaded custom agent: %s from %s", name, md_file.name)
+        except Exception as e:
+            logger.debug("failed to load custom agent %s: %s", md_file.name, e)
+    return custom
+
+
+def _get_all_agents() -> dict[str, dict[str, Any]]:
+    """返回所有 agent（内置 + 自定义）。"""
+    agents = dict(BUILTIN_AGENTS)
+    agents.update(_load_custom_agents())
+    return agents
+
+
 class AgentTool:
     """Agent 工具：委派任务给子代理。"""
 
@@ -74,25 +136,62 @@ class AgentTool:
     @property
     def description(self) -> str:
         agent_lines = []
-        for agent_type, info in BUILTIN_AGENTS.items():
-            agent_lines.append(f"- {agent_type}: {info['description']}")
+        for agent_type, info in _get_all_agents().items():
+            tools_desc = ", ".join(info["tools"]) if info.get("tools") else "All tools"
+            agent_lines.append(f"- {agent_type}: {info['description']} (Tools: {tools_desc})")
         agent_list = "\n".join(agent_lines)
 
         return (
-            "Launch a specialized sub-agent to handle a task autonomously.\n\n"
-            f"Available agent types:\n{agent_list}\n\n"
-            "The agent runs in an isolated context with its own tool set and returns results when done."
+            "Launch a new agent to handle complex, multi-step tasks autonomously.\n\n"
+            "The agent tool launches specialized agents that autonomously handle complex tasks. "
+            "Each agent type has specific capabilities and tools available to it.\n\n"
+            f"Available agent types and the tools they have access to:\n{agent_list}\n\n"
+            "When using this tool, specify a subagent_type parameter to select which agent type to use. "
+            "If omitted, the general-purpose agent is used.\n\n"
+            "Agent routing rules:\n"
+            "- Planning intent wins over exploration intent. If the user asks to plan, design, "
+            "propose an approach, or add a feature with a plan, use subagent_type=Plan even "
+            "when the agent must inspect the codebase first.\n"
+            "- Use subagent_type=Explore only for pure discovery or analysis requests where "
+            "the user is not asking for an implementation plan.\n"
+            "- Use subagent_type=Verification only for checking completed work, tests, diffs, "
+            "or regressions.\n\n"
+            "When NOT to use this tool:\n"
+            "- If you want to read a specific file path, use read_file instead\n"
+            "- If you are searching for a specific class/function like 'class Foo', "
+            "use grep instead\n"
+            "- If you are searching within a specific file, use read_file instead\n"
+            "- Other tasks not related to the agent descriptions above\n\n"
+            "Usage notes:\n"
+            "- Always include a short description (3-5 words) summarizing what the agent will do\n"
+            "- The agent runs in an isolated context and returns results when done. "
+            "The result is not visible to the user — summarize it for them.\n"
+            "- Clearly tell the agent whether to write code or just do research\n"
+            "- If the agent description matches the user's task, use it without asking first\n\n"
+            "Writing the prompt:\n"
+            "Brief the agent like a smart colleague who just walked into the room — "
+            "it hasn't seen this conversation. Explain what you're trying to accomplish and why. "
+            "Give enough context for judgment calls rather than narrow instructions.\n\n"
+            "Example:\n"
+            "user: 'What design patterns does this project use?'\n"
+            "-> Use subagent_type=Explore\n\n"
+            "user: 'Help me plan adding a /undo command'\n"
+            "-> Use subagent_type=Plan\n\n"
+            "user: 'Verify the tests pass after my changes'\n"
+            "-> Use subagent_type=Verification"
         )
 
     @property
     def input_schema(self) -> dict[str, Any]:
+        all_agents = _get_all_agents()
+        agent_types = list(all_agents.keys())
         return {
             "type": "object",
             "properties": {
                 "subagent_type": {
                     "type": "string",
-                    "description": "Type of agent: 'Explore', 'Plan', or 'general-purpose'",
-                    "enum": ["Explore", "Plan", "general-purpose"],
+                    "description": f"Type of agent: {', '.join(agent_types)}",
+                    "enum": agent_types,
                 },
                 "description": {
                     "type": "string",
@@ -118,7 +217,7 @@ class AgentTool:
         if not prompt:
             return "Error: Agent prompt is required."
 
-        agent_config = BUILTIN_AGENTS.get(subagent_type)
+        agent_config = _get_all_agents().get(subagent_type)
         if not agent_config:
             return f"Error: Unknown agent type '{subagent_type}'"
 

@@ -107,29 +107,34 @@ class TestDispatchCommands:
 
     @pytest.mark.asyncio
     async def test_model(self, monkeypatch):
-        called = {"picker": False, "refresh": False}
+        called = {"wizard": False, "refresh": False}
+        call_count = {"n": 0}
 
-        def fake_picker():
-            called["picker"] = True
-            return {"changed": True, "model": "gpt-4o", "provider": "openai"}
+        def fake_wizard():
+            called["wizard"] = True
 
         def fake_refresh():
             called["refresh"] = True
-            return "gpt-4o"
 
-        monkeypatch.setattr("termpilot.config.run_model_picker", fake_picker)
+        def fake_get_model():
+            call_count["n"] += 1
+            return "gpt-4o" if call_count["n"] > 1 else "glm-5.1"
+
+        monkeypatch.setattr("termpilot.config.run_setup_wizard", fake_wizard)
+        monkeypatch.setattr("termpilot.config.get_effective_model", fake_get_model)
         result = await dispatch_command("model", "", {"refresh_runtime": fake_refresh})
 
-        assert called["picker"] is True
+        assert called["wizard"] is True
         assert called["refresh"] is True
         assert result.output == "Switched model to gpt-4o"
 
     @pytest.mark.asyncio
     async def test_model_cancelled(self, monkeypatch):
-        def fake_picker():
-            return {"changed": False, "model": "glm-5.1", "provider": "zhipu"}
+        def fake_wizard():
+            pass
 
-        monkeypatch.setattr("termpilot.config.run_model_picker", fake_picker)
+        monkeypatch.setattr("termpilot.config.run_setup_wizard", fake_wizard)
+        monkeypatch.setattr("termpilot.config.get_effective_model", lambda: "glm-5.1")
         result = await dispatch_command("model", "", {})
 
         assert result.output == "Kept model as glm-5.1"
