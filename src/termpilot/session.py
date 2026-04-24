@@ -220,6 +220,10 @@ class SessionStorage:
         entry = make_metadata_entry(entry_type, value, self._session_id)
         self._append_line(entry)
 
+    def set_last_uuid(self, uuid: str) -> None:
+        """更新链表尾指针（用于 rewind 后让新 entry 从该节点分支）。"""
+        self._last_uuid = uuid
+
 
 # ---------------------------------------------------------------------------
 # 会话加载 & 列表 — 对应 TS conversationRecovery.ts + sessionStorage.ts
@@ -340,17 +344,23 @@ def load_session(session_id: str, cwd: str | None = None) -> list[dict[str, Any]
     return messages
 
 
-def _build_conversation_chain(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _build_conversation_chain(
+        entries: list[dict[str, Any]],
+        leaf_uuid: str | None = None,
+) -> list[dict[str, Any]]:
     """通过 parentUuid 链回溯构建对话链。
 
     对应 TS conversationRecovery.ts buildConversationChain()。
 
+    Args:
+        entries: 所有 transcript entry 列表
+        leaf_uuid: 指定叶节点 uuid，None 则自动选最新叶节点
+
     算法：
     1. 构建 uuid → entry 的映射
-    2. 找到最新的叶节点（没有子节点的 entry）
-    3. 从叶节点沿 parentUuid 回溯到根
-    4. 反转得到时间正序的对话链
-    5. 恢复并行工具结果中被链回溯遗漏的孤儿 entry
+    2. 从指定叶节点（或自动检测的最新叶节点）沿 parentUuid 回溯到根
+    3. 反转得到时间正序的对话链
+    4. 恢复并行工具结果中被链回溯遗漏的孤儿 entry
     """
     if not entries:
         return []
@@ -366,28 +376,30 @@ def _build_conversation_chain(entries: list[dict[str, Any]]) -> list[dict[str, A
         # 没有 uuid 的旧格式 — fallback 到顺序读取
         return list(entries)
 
-    # 2. 找到叶节点：uuid 不被任何其他 entry 的 parentUuid 引用
-    child_uuids: set[str] = set()
-    for entry in entries:
-        parent = entry.get("parentUuid")
-        if parent and parent in uuid_map:
-            child_uuids.add(parent)
+    # 2. 确定叶节点
+    if leaf_uuid is None:
+        # 自动检测：找到最新的叶节点（没有子节点的 entry）
+        child_uuids: set[str] = set()
+        for entry in entries:
+            parent = entry.get("parentUuid")
+            if parent and parent in uuid_map:
+                child_uuids.add(parent)
 
-    # 候选叶节点 = 不在任何 parentUuid 指向中的 entry
-    leaf_candidates = [
-        uuid for uuid in uuid_map
-        if uuid not in child_uuids
-    ]
+        leaf_candidates = [
+            uuid for uuid in uuid_map
+            if uuid not in child_uuids
+        ]
 
-    if not leaf_candidates:
-        # 所有人都被引用了（可能是循环）— fallback 顺序读取
-        logger.debug("no leaf candidates found, falling back to sequential read")
-        return list(entries)
+        if not leaf_candidates:
+            logger.debug("no leaf candidates found, falling back to sequential read")
+            return list(entries)
 
-    # 选择最新的叶节点（在 entries 中出现最晚的）
-    entry_order = {e.get("uuid"): i for i, e in enumerate(entries) if e.get("uuid")}
-    leaf_candidates.sort(key=lambda u: entry_order.get(u, 0), reverse=True)
-    leaf_uuid = leaf_candidates[0]
+        entry_order = {e.get("uuid"): i for i, e in enumerate(entries) if e.get("uuid")}
+        leaf_candidates.sort(key=lambda u: entry_order.get(u, 0), reverse=True)
+        leaf_uuid = leaf_candidates[0]
+    elif leaf_uuid not in uuid_map:
+        logger.debug("specified leaf_uuid %s not found", leaf_uuid[:8])
+        return []
 
     # 3. 从叶节点沿 parentUuid 回溯到根
     chain: list[dict[str, Any]] = []
@@ -413,6 +425,54 @@ def _build_conversation_chain(entries: list[dict[str, Any]]) -> list[dict[str, A
     logger.debug("chain built: %d entries from %d total (leaf=%s)",
                  len(chain), len(entries), leaf_uuid[:8])
     return chain
+
+
+def list_session_turns(session_id: str, cwd: str | None = None) -> list[dict[str, Any]]:
+    """列出会话中所有用户消息 turn，用于 /rewind 选择。
+
+    返回列表按时间正序，每项包含 uuid、parent_uuid、timestamp、preview。
+    """
+    project_dir = get_project_dir(cwd)
+    file_path = project_dir / f"{session_id}.jsonl"
+    entries = _parse_jsonl(file_path)
+    transcript = [e for e in entries if e.get("type") == "transcript"]
+
+    turns: list[dict[str, Any]] = []
+    for entry in transcript:
+        msg = entry.get("message", {})
+        if msg.get("role") == "user" and isinstance(msg.get("content"), str):
+            turns.append({
+                "uuid": entry["uuid"],
+                "parent_uuid": entry.get("parentUuid"),
+                "timestamp": entry.get("timestamp", ""),
+                "preview": msg["content"][:80],
+            })
+    return turns
+
+
+def load_session_at_point(
+        session_id: str,
+        target_uuid: str,
+        cwd: str | None = None,
+) -> list[dict[str, Any]]:
+    """加载会话到指定 entry 为止的对话链（用于 /rewind）。
+
+    从 target_uuid 沿 parentUuid 回溯到根，返回 API 格式消息列表。
+    """
+    project_dir = get_project_dir(cwd)
+    file_path = project_dir / f"{session_id}.jsonl"
+    entries = _parse_jsonl(file_path)
+    transcript = [e for e in entries if e.get("type") == "transcript"]
+    chain = _build_conversation_chain(transcript, leaf_uuid=target_uuid)
+
+    messages: list[dict[str, Any]] = []
+    for entry in chain:
+        msg = entry.get("message", {})
+        role = msg.get("role")
+        content = msg.get("content")
+        if role and content:
+            messages.append({"role": role, "content": content})
+    return messages
 
 
 def _recover_orphaned_entries(

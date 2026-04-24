@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import sys
 from collections.abc import AsyncGenerator
 from pathlib import Path
@@ -55,6 +56,23 @@ MAX_CONCURRENT_TOOLS = int(
     __import__("os").environ.get("CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY", "10") or "10"
 )
 
+MAX_API_RETRIES = 3
+MAX_TOOL_RETRIES = 2
+
+
+def _is_retryable_error(exc: Exception) -> bool:
+    """判断 API 错误是否可重试（429/5xx/超时/网络）。"""
+    s = str(exc).lower()
+    if any(code in s for code in ("429", "500", "502", "503", "504")):
+        return True
+    return any(w in s for w in ("timeout", "timed out", "connection", "network"))
+
+
+def _is_retryable_tool_error(exc: Exception) -> bool:
+    """判断 tool 执行错误是否可重试（超时/限流）。"""
+    s = str(exc).lower()
+    return any(w in s for w in ("timeout", "timed out", "429", "rate limit"))
+
 
 def create_client() -> tuple[Any, str]:
     """创建 API 客户端。
@@ -79,7 +97,7 @@ def create_client() -> tuple[Any, str]:
             f"Then run termpilot again."
         )
 
-    if provider == "anthropic":
+    if provider in ("anthropic", "zhipu"):
         try:
             from anthropic import AsyncAnthropic
         except ImportError:
@@ -87,7 +105,10 @@ def create_client() -> tuple[Any, str]:
                 "Anthropic SDK not installed.\n"
                 "Run: pip install anthropic"
             )
-        base_url = get_effective_base_url(provider)
+        if provider == "zhipu":
+            base_url = os.environ.get("ZHIPU_ANTHROPIC_BASE_URL") or "https://open.bigmodel.cn/api/anthropic"
+        else:
+            base_url = get_effective_base_url(provider)
         kwargs: dict[str, Any] = {"api_key": api_key}
         if base_url:
             kwargs["base_url"] = base_url
@@ -470,12 +491,21 @@ async def _execute_tools_concurrent(
                         "name": tb["name"],
                         "input": tb["input"],
                     })
-                try:
-                    result_text = await tool.call(**tb["input"])
-                    success = True
-                except Exception as e:
-                    result_text = f"工具执行错误: {e}"
-                    success = False
+                success = False
+                result_text = ""
+                for attempt in range(MAX_TOOL_RETRIES + 1):
+                    try:
+                        result_text = await tool.call(**tb["input"])
+                        success = True
+                        break
+                    except Exception as e:
+                        if attempt == MAX_TOOL_RETRIES or not _is_retryable_tool_error(e):
+                            result_text = f"工具执行错误: {e}"
+                            break
+                        wait = 2 ** attempt
+                        logger.warning("tool %s error (attempt %d), retrying in %ds: %s",
+                                       tb["name"], attempt + 1, wait, e)
+                        await asyncio.sleep(wait)
             # 处理大型工具结果（持久化到磁盘）
             result_text = process_tool_result(result_text, tb["id"], tb["name"])
             # PostToolUse Hook
@@ -520,12 +550,24 @@ async def _execute_tools_concurrent(
                 "name": tb["name"],
                 "input": tb["input"],
             })
-        try:
-            result_text = await tool.call(**tb["input"])
-            success = True
-        except Exception as e:
-            result_text = f"工具执行错误: {e}"
-            success = False
+            # 交互式工具需要先清除 spinner，否则遮挡输入
+            if tb["name"] in ("ask_user_question", "exit_plan_mode"):
+                on_event({"type": "status_cleared"})
+        success = False
+        result_text = ""
+        for attempt in range(MAX_TOOL_RETRIES + 1):
+            try:
+                result_text = await tool.call(**tb["input"])
+                success = True
+                break
+            except Exception as e:
+                if attempt == MAX_TOOL_RETRIES or not _is_retryable_tool_error(e):
+                    result_text = f"工具执行错误: {e}"
+                    break
+                wait = 2 ** attempt
+                logger.warning("tool %s error (attempt %d), retrying in %ds: %s",
+                               tb["name"], attempt + 1, wait, e)
+                await asyncio.sleep(wait)
         # 处理大型工具结果（持久化到磁盘）
         result_text = process_tool_result(result_text, tb["id"], tb["name"])
         # PostToolUse Hook
@@ -574,6 +616,7 @@ async def query_with_tools(
         session_id: str = "",
         cost_tracker: Any | None = None,
         client_format: str = "openai",
+        on_assistant_message: Any = None,
 ) -> str:
     """带工具调用的完整查询循环。
 
@@ -611,14 +654,25 @@ async def query_with_tools(
         iteration_usage: dict[str, int] | None = None
         assistant_started = False
 
-        if client_format == "anthropic":
-            stream = _call_anthropic_streaming(
-                client, model, system_prompt, current_messages, tools_schema, max_tokens,
-            )
-        else:
-            stream = _call_openai_streaming(
-                client, model, system_prompt, current_messages, tools_schema, max_tokens,
-            )
+        # 流式调用（带重试）
+        for api_attempt in range(MAX_API_RETRIES + 1):
+            try:
+                if client_format == "anthropic":
+                    stream = _call_anthropic_streaming(
+                        client, model, system_prompt, current_messages, tools_schema, max_tokens,
+                    )
+                else:
+                    stream = _call_openai_streaming(
+                        client, model, system_prompt, current_messages, tools_schema, max_tokens,
+                    )
+                break
+            except Exception as e:
+                if api_attempt == MAX_API_RETRIES or not _is_retryable_error(e):
+                    raise
+                wait = 2 ** api_attempt
+                logger.warning("API error (attempt %d/%d), retrying in %ds: %s",
+                               api_attempt + 1, MAX_API_RETRIES + 1, wait, e)
+                await asyncio.sleep(wait)
 
         async for event in stream:
             if event["type"] == "text":
@@ -673,6 +727,10 @@ async def query_with_tools(
             "content": assistant_text or None,
             "tool_calls": tool_calls,
         })
+
+        # 写入 session（确保每轮中间状态持久化）
+        if on_assistant_message:
+            on_assistant_message(assistant_text, tool_calls)
 
         # 2. 并发执行工具调用
         tool_results = await _execute_tools_concurrent(

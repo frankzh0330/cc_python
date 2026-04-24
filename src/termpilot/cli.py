@@ -47,10 +47,13 @@ async def _permission_prompt(
         tool_name: str,
         tool_input: dict,
         message: str,
+        ui: QuietUI | None = None,
 ) -> PermissionResult:
     """权限确认提示。对应 TS useCanUseTool.tsx 的用户交互部分。"""
     import questionary
 
+    if ui:
+        ui.clear_status()
     console.print()
     console.rule("[bold yellow]权限请求[/]")
     console.print(f"[bold]{tool_name}[/] — {message}")
@@ -143,6 +146,11 @@ async def _stream_response_with_tools(
         if storage:
             storage.record_tool_call(name, input_data, result)
 
+    def on_assistant_message(text: str, tool_calls: list) -> None:
+        # 记录 assistant 中间消息到 session（确保崩溃可恢复）
+        if storage and text and text.strip():
+            storage.record_assistant_message(text)
+
     def on_event(event: dict[str, Any]) -> None:
         if ui:
             ui.handle_event(event)
@@ -160,10 +168,11 @@ async def _stream_response_with_tools(
             on_tool_call=on_tool_call,
             on_event=on_event,
             permission_context=permission_context,
-            on_permission_ask=_permission_prompt,
+            on_permission_ask=lambda tn, ti, m: _permission_prompt(tn, ti, m, ui=ui),
             session_id=session_id,
             cost_tracker=cost_tracker,
             client_format=client_format,
+            on_assistant_message=on_assistant_message,
         )
     except Exception:
         if ui:
@@ -476,6 +485,7 @@ async def _async_interactive(model: str, resume_session_id: str | None = None) -
                     "ui": ui,
                     "client_format": client_format,
                     "refresh_runtime": refresh_runtime,
+                    "storage": storage,
                 }
                 result = await dispatch_command(cmd_name, cmd_args, cmd_context)
                 logger.debug("command result: exit_repl=%s, should_query=%s, output=%d chars",
