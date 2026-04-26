@@ -229,7 +229,6 @@ For a deeper module breakdown, see [ARCHITECTURE.md](ARCHITECTURE.md).
 - [docs/golden-rules.md](docs/golden-rules.md): mechanical coding rules
 - [docs/conventions.md](docs/conventions.md): naming and organization conventions
 - [docs/hooks.md](docs/hooks.md): hook design and behavior
-- [docs/termpilotmd.md](docs/termpilotmd.md): project instruction loading
 - [docs/compact.md](docs/compact.md): compaction strategy
 - [docs/mcp_skills.md](docs/mcp_skills.md): MCP, skills, and commands
 - [docs/task-tool.md](docs/task-tool.md): task management, persistence, and dependency graph
