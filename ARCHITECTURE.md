@@ -139,6 +139,17 @@ Current tool families:
 - MCP dynamic tools and resource readers
 - Skill expansion tool
 
+## Planned Evaluation Harness
+
+The evaluation harness is planned as a sidecar engineering layer, not part of
+the interactive runtime path. It will drive TermPilot through stable CLI/API
+entry points, isolate task workspaces, record trajectories, run deterministic
+verifiers, and produce reports for regression tracking.
+
+This keeps the production agent loop focused on user interaction while giving
+the project a repeatable way to measure task completion quality. The detailed
+plan is documented in [docs/harness-engineering.md](docs/harness-engineering.md).
+
 ## Runtime Flow
 
 ```text

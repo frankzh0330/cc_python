@@ -139,6 +139,15 @@ cli.py
 - MCP 动态工具和资源读取工具
 - Skill 展开工具
 
+## 计划中的评测 Harness
+
+计划把评测 harness 设计成一个 sidecar 工程层，而不是交互式 runtime path
+的一部分。它会通过稳定的 CLI/API 入口驱动 TermPilot，隔离任务工作区，
+记录 trajectory，运行确定性的 verifier，并生成用于回归追踪的报告。
+
+这样可以让生产 agent loop 专注于用户交互，同时让项目具备可重复衡量任务完成质量的能力。
+详细规划见 [docs/harness-engineering.zh-CN.md](docs/harness-engineering.zh-CN.md)。
+
 ## 运行时主流程
 
 ```text
